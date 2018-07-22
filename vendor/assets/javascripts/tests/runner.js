@@ -3,10 +3,12 @@ var idx = 0; //or enter the index like before. ex.: 5
 var limit = (idx == 0 ? tests.length - 1 : idx);
 
 for (idx; idx <= limit; idx++) {
-    if (!tests[idx].jsonform.form) {
-      tests[idx].jsonform.form = ['*'];
+    let curJsonform = tests[idx].jsonform;
+    
+    if (!curJsonform.form) {
+      curJsonform.form = ['*'];
     }
-    tests[idx].jsonform.form.push({
+    curJsonform.form.push({
       type: 'actions',
       items: [
         {
@@ -15,12 +17,13 @@ for (idx; idx <= limit; idx++) {
         }
       ]
     });
-    tests[idx].jsonform.onSubmit = function (errors, values) {
+    curJsonform.onSubmit = function (errors, values) {
       console.log(errors, values);
     };
-
-    $('<h1>Test "<span class="test-name"></span>"</h1>').appendTo($tests);
-    $('<form id="testform" class="form-vertical"></form>').appendTo($tests);
-    $tests.find(".test-name").last().html(tests[idx].name);
-    $tests.find("#testform").last().jsonForm(tests[idx].jsonform);
+    
+    let testWrapper = $(`<div class="test-wrapper test-wrapper--${idx}"></div>`).appendTo($tests);
+    $(`<h1>Test ${idx}: "<span class="test-name">${tests[idx].name}</span>"</h1>`).appendTo(testWrapper);
+    $(`<form id="testform-${idx}" class="form-vertical"></form>`)
+        .appendTo(testWrapper)
+        .jsonForm(curJsonform);
 }
