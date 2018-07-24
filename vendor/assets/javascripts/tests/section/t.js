@@ -53,7 +53,7 @@ var tests = [
           items: [
             {
               type: 'section',
-              title: 'Number {{idx}}',
+              title: 'Number <<idx>>',
               items: [
                 {
                   key: 'arr[].name',

@@ -44,10 +44,15 @@
 
     /**
      * Template settings for value replacement
+     * 
+     * 2018-07-22 Coridyn
+     * Change jsonform interpolation characters from '{{ }}' to '<< >>'
+     * to avoid clashes with AngularJS interpolation characters that
+     * we want to have (e.g. in our 'default' values)
      */
     var valueTemplateSettings = {
         evaluate    : /\{\[([\s\S]+?)\]\}/g,
-        interpolate : /\{\{([\s\S]+?)\}\}/g
+        interpolate : /<<([\s\S]+?)>>/g
     };
 
     /**
@@ -1824,7 +1829,7 @@
     
     
     /**
-     * 2017-03-10
+     * 2017-03-10 Coridyn
      * 
      * Normalise jsonschema types to a standard representation.
      * 
@@ -1836,11 +1841,60 @@
      * ['string'] => 'string'
      * ['string', 'number'] => 'number,string'
      */
-    var normaliseType = function(type){
+    function normaliseType(type){
         var arrayType = [].concat(type);
         var result = arrayType.concat().sort().toString();
         return result;
-    };
+    }
+    
+    
+    /**
+     * 2018-07-22 Coridyn
+     * 
+     * jsonform interpolation handling - refactored from previous implementation to 
+     * centralise the behaviour and remove duplicate code.
+     * 
+     * `hasInterp()` - Returns `true` if the jsonform schema is referencing other fields
+     * `normaliseInterp()` - Replace '<<values.>>' with '<<getValue(key)>>'
+     * `setupInterpContext()` - Adds common functions/data to the interpolation context so they
+     * can be accessed in lodash/underscore template functions. e.g. add function to escape HTML, etc.
+     * 
+     * Normalise jsonschema interpolation strings
+     */
+    var _valuesRE = /<<\s*values\.([^>]+)>>/i;
+    function hasInterp(str){
+        // This label wants to use the value of another input field.
+        var result = _valuesRE.test(str);
+        return result;
+    }
+    function normaliseInterp(str){
+        // Convert <<values.>> construct into <<getValue(key)>> for
+        // Underscore to call the appropriate function of formData
+        // when template gets called (note calling a function is not
+        // exactly Mustache-friendly but is supported by Underscore).
+        var result = str.replace(
+            /<<\s*values\.([^>]+)>>/g,
+            '<<getValue("$1")>>');
+        return result;
+    }
+    /**
+     * Remove duplicate code and implement common behaviour to set up 
+     * underscore interpolation or apply an array path to the given value.
+     */
+    function applyInterpOrArrayPath(value, arrayPath){
+        var result = value;
+        if (hasInterp(value)){
+            // This label wants to use the value of another input field.
+            result = normaliseInterp(value);
+        } else {
+            // Note applying the array path probably doesn't make any sense,
+            // but some geek might want to have a label "foo[].bar[].baz",
+            // with the [] replaced by the appropriate array path.
+            result = applyArrayPath(value, arrayPath);
+        }
+        
+        return result;
+    }
 
 
     /**
@@ -1959,7 +2013,7 @@
      * the function returns the label, and not the intrinsic value.
      *
      * The function handles values that contains template strings,
-     * e.g. {{values.foo[].bar}} or {{idx}}.
+     * e.g. <<values.foo[].bar>> or <<idx>>.
      *
      * When the form is a string, the function truncates the resulting string
      * to meet a potential "maxLength" constraint defined in the schema, using
@@ -1988,27 +2042,6 @@
             return getInitialValue(formObject, key, arrayPath, tpldata, usePreviousValues);
         };
 
-        // Helper function that returns the form element that explicitly
-        // references the given key in the schema.
-        var getFormElement = function (elements, key) {
-            var formElement = null;
-            if (!elements || !elements.length) return null;
-            _.each(elements, function (elt) {
-                if (formElement) return;
-                if (elt === key) {
-                    formElement = { key: elt };
-                    return;
-                }
-                if (_.isString(elt)) return;
-                if (elt.key === key) {
-                    formElement = elt;
-                }
-                else if (elt.items) {
-                    formElement = getFormElement(elt.items, key);
-                }
-            });
-            return formElement;
-        };
         var formElement = getFormElement(formObject.form || [], key);
         var schemaElement = getSchemaKey(formObject.schema.properties, key);
 
@@ -2022,23 +2055,18 @@
                 // the key as it may override the schema's default value
                 // (note a "null" value overrides a schema default value as well)
                 value = formElement['value'];
-            }
-            else if (schemaElement) {
+            } else if (schemaElement) {
                 // Simply extract the default value from the schema
                 if (isSet(schemaElement['default'])) {
                     value = schemaElement['default'];
                 }
             }
-            if (value && value.indexOf('{{values.') !== -1) {
+            
+            if (hasInterp(value)) {
                 // This label wants to use the value of another input field.
-                // Convert that construct into {{getValue(key)}} for
-                // Underscore to call the appropriate function of formData
-                // when template gets called (note calling a function is not
-                // exactly Mustache-friendly but is supported by Underscore).
-                value = value.replace(
-                    /\{\{values\.([^\}]+)\}\}/g,
-                    '{{getValue("$1")}}');
+                value = normaliseInterp(value);
             }
+            
             if (value) {
                 value = _.template(value, tpldata, valueTemplateSettings);
             }
@@ -2048,8 +2076,7 @@
         if (isSet(value) && formElement &&
             formElement.titleMap &&
             formElement.titleMap[value]) {
-            value = _.template(formElement.titleMap[value],
-                tpldata, valueTemplateSettings);
+            value = _.template(formElement.titleMap[value], tpldata, valueTemplateSettings);
         }
 
         // Check maximum length of a string
@@ -2068,6 +2095,29 @@
             return value;
         }
     };
+    
+    
+    // Helper function that returns the form element that explicitly
+    // references the given key in the schema.
+    function getFormElement(elements, key) {
+        var formElement = null;
+        if (!elements || !elements.length) return null;
+        _.each(elements, function (elt) {
+            if (formElement) return;
+            if (elt === key) {
+                formElement = { key: elt };
+                return;
+            }
+            if (_.isString(elt)) return;
+            if (elt.key === key) {
+                formElement = elt;
+            }
+            else if (elt.items) {
+                formElement = getFormElement(elt.items, key);
+            }
+        });
+        return formElement;
+    }
 
 
     /**
@@ -2400,7 +2450,7 @@
         var node = null;
         var nbChildren = 1;
         var i = 0;
-        var formData = this.ownerTree.formDesc.tpldata || {};
+        var formData = Object.create(this.ownerTree.formDesc.tpldata || null);
 
         // Propagate the array path from the parent node
         // (adding the position of the child for nodes that are direct
@@ -2427,9 +2477,7 @@
 
         // Prepare special function to compute the value of another field
         formData.getValue = function (key) {
-            return getInitialValue(self.ownerTree.formDesc,
-                key, self.arrayPath,
-                formData, !!values);
+            return getInitialValue(self.ownerTree.formDesc, key, self.arrayPath, formData, !!values);
         };
 
         if (this.formElement) {
@@ -2484,55 +2532,38 @@
                 'placeholder',
                 'readOnly'
             ], function (prop) {
-                if (_.isString(this.formElement[prop])) {
-                    if (this.formElement[prop].indexOf('{{values.') !== -1) {
-                        // This label wants to use the value of another input field.
-                        // Convert that construct into {{jsonform.getValue(key)}} for
-                        // Underscore to call the appropriate function of formData
-                        // when template gets called (note calling a function is not
-                        // exactly Mustache-friendly but is supported by Underscore).
-                        this[prop] = this.formElement[prop].replace(
-                            /\{\{values\.([^\}]+)\}\}/g,
-                            '{{getValue("$1")}}');
-                    }
-                    else {
-                        // Note applying the array path probably doesn't make any sense,
-                        // but some geek might want to have a label "foo[].bar[].baz",
-                        // with the [] replaced by the appropriate array path.
-                        this[prop] = applyArrayPath(this.formElement[prop], this.arrayPath);
-                    }
-                    if (this[prop]) {
-                        this[prop] = _.template(this[prop], formData, valueTemplateSettings);
+                
+                var propVal = self.formElement[prop];
+                if (_.isString(propVal)) {
+                    propVal = applyInterpOrArrayPath(propVal, self.arrayPath);
+                    if (propVal) {
+                        propVal = _.template(propVal, formData, valueTemplateSettings);
                     }
                 }
-                else {
-                    this[prop] = this.formElement[prop];
-                }
-            }, this);
+                self[prop] = propVal;
+            });
 
             // Apply templating to options created with "titleMap" as well
             if (this.formElement.options) {
-                this.options = _.map(this.formElement.options, function (option) {
-                    var title = null;
+                this.options = _.map(this.formElement.options, function(option) {
+                    var resultOption = option;
+                    
                     if (_.isObject(option) && option.title) {
-                        // See a few lines above for more details about templating
-                        // preparation here.
-                        if (option.title.indexOf('{{values.') !== -1) {
-                            title = option.title.replace(
-                                /\{\{values\.([^\}]+)\}\}/g,
-                                '{{getValue("$1")}}');
-                        }
-                        else {
-                            title = applyArrayPath(option.title, self.arrayPath);
-                        }
-                        return _.extend({}, option, {
-                            value: (isSet(option.value) ? option.value : ''),
-                            title: _.template(title, formData, valueTemplateSettings)
-                        });
+                        
+                        var titleValue = applyInterpOrArrayPath(option.title, self.arrayPath);
+                        titleValue = _.template(titleValue, formData, valueTemplateSettings);
+                        
+                        resultOption = _.extend(
+                            {},
+                            option,
+                            {
+                                value: option.value || '',
+                                title: titleValue
+                            }
+                        );
                     }
-                    else {
-                        return option;
-                    }
+                    
+                    return resultOption;
                 });
             }
         }
@@ -2561,35 +2592,23 @@
             }
     
             /**
-             * CFH: Set the default value if no value was retrieved above 
+             * Coridyn: Set the default value if no value was retrieved above 
              */
             if (!ignoreDefaultValues) {
                 // No previously submitted form result, use default value
                 // defined in the schema if it's available and not already
                 // defined in the form element
                 if (!isSet(this.value) && isSet(this.schemaElement['default'])) {
-                    this.value = this.schemaElement['default'];
-                    if (_.isString(this.value)) {
-                        if (this.value.indexOf('{{values.') !== -1) {
-                            // This label wants to use the value of another input field.
-                            // Convert that construct into {{jsonform.getValue(key)}} for
-                            // Underscore to call the appropriate function of formData
-                            // when template gets called (note calling a function is not
-                            // exactly Mustache-friendly but is supported by Underscore).
-                            this.value = this.value.replace(
-                                /\{\{values\.([^\}]+)\}\}/g,
-                                '{{getValue("$1")}}');
-                        } else {
-                            // Note applying the array path probably doesn't make any sense,
-                            // but some geek might want to have a label "foo[].bar[].baz",
-                            // with the [] replaced by the appropriate array path.
-                            this.value = applyArrayPath(this.value, this.arrayPath);
-                        }
-                        
-                        if (this.value) {
-                            this.value = _.template(this.value, formData, valueTemplateSettings);
+                    var _valueDefault = this.schemaElement['default'];
+                    
+                    if (_.isString(_valueDefault)) {
+                        _valueDefault = applyInterpOrArrayPath(_valueDefault, this.arrayPath);
+                        if (_valueDefault) {
+                            _valueDefault = _.template(_valueDefault, formData, valueTemplateSettings);
                         }
                     }
+                    
+                    this.value = _valueDefault;
                     this.defaultValue = true;
                 }
             }
@@ -2816,9 +2835,19 @@
                     }
                 }
             }
+            
+            /*
+            2018-07-22 Coridyn
+            I don't think we should convert empty strings to null here.
+            Just leave them as '' - that way we can differentiate between
+            a missing field: `null || undefined` and an *empty* field: `''`
+            
+            However, coerce `'null'` to an explicit `null` value.
+            */
             if ((eltSchemaType === 'string') &&
                 (formArray[i].value === '') &&
                 !eltSchema._jsonform_allowEmpty) {
+                
                 formArray[i].value=null;
             }
             if ((eltSchemaType === 'object') &&
@@ -3434,6 +3463,26 @@
      * @function
      */
     formTree.prototype.buildTree = function () {
+        /*
+        2018-07-22 Coridyn
+        
+        TODO: Simplify this to map `this.formDesc.form` to a single consolidated list of IFormElement items
+        and only *then* run `buildFromLayout(...)` with each IFormElement
+        
+        TODO: Allow a template IFormElement glob `{key: '*', ...}` and merge those properties
+        over each IFormElement that we create
+        
+        e.g. this lets us pass `allowEmpty` on this top-level element and have it passed down to each child as well:
+        
+        {
+            key: '*',
+            allowEmpty: true
+        }
+       
+        test for: `formElement === '*' || formElement.key === '*'`
+        */
+        
+        
         // Parse and generate the form structure based on the elements encountered:
         // - '*' means "generate all possible fields using default layout"
         // - a key reference to target a specific data element
