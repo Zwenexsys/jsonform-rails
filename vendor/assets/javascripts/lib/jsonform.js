@@ -505,7 +505,9 @@
 
                 if (window.ace){
                     // Setup immediately
-                    setup();
+                    setTimeout(function(){
+                        setup();
+                    }, 1000);
                 } else {
                     // Wait until ACE is loaded
                     var itv = window.setInterval(function() {
