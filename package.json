@@ -28,6 +28,8 @@
     }
   ],
   "devDependencies": {
-    "http-server": "^0.11.1"
+    "http-server": "^0.11.1",
+    "rimraf": "^2.6.2",
+    "rollup": "^0.63.4"
   }
 }
