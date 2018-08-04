@@ -71,3 +71,5 @@ var tests = [
     }
   }
 ];
+
+addTests(tests, 'section');

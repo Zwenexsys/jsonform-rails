@@ -214,3 +214,5 @@ var tests = [
     }
   }
 ];
+
+addTests(tests, 'tabarray');

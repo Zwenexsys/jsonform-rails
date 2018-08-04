@@ -153,3 +153,5 @@ var tests = [
     }
   }
 ];
+
+addTests(tests, 'i18n');

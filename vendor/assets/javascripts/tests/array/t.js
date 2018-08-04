@@ -168,3 +168,5 @@ var tests = [
     }
   }
 ];
+
+addTests(tests, 'array');

@@ -323,3 +323,5 @@ var tests = [
     }
   }
 ];
+
+addTests(tests, 'value');
